@@ -1,0 +1,348 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dodge the Blocks</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #080d1c;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 16px;
+    }
+
+    .game {
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+    }
+
+    h1 {
+      color: #67e8f9;
+      letter-spacing: 3px;
+      font-size: 26px;
+      text-shadow: 0 0 15px #06b6d4;
+    }
+
+    .stats {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 4px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    canvas {
+      width: 100%;
+      display: block;
+      background: #0c1428;
+      border: 2px solid #164e63;
+      border-radius: 12px;
+      box-shadow: 0 0 24px #0891b233;
+      touch-action: none;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 13px 22px;
+      margin: 12px 5px;
+      background: #06b6d4;
+      color: #04111c;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover { background: #67e8f9; }
+
+    p { color: #a5b4cc; font-size: 14px; }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 25px;
+    }
+
+    .controls button {
+      width: 100px;
+      font-size: 24px;
+      margin: 10px 0;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="game">
+    <h1>DODGE THE BLOCKS</h1>
+
+    <div class="stats">
+      <span>Score: <span id="score">0</span></span>
+      <span>Best: <span id="best">0</span></span>
+    </div>
+
+    <canvas id="gameCanvas" width="400" height="550"></canvas>
+
+    <button id="startBtn">Start Game</button>
+
+    <div class="controls">
+      <button id="leftBtn" aria-label="Move left">◀</button>
+      <button id="rightBtn" aria-label="Move right">▶</button>
+    </div>
+
+    <p>Use ← → or A / D to move. Avoid the red blocks!</p>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const bestEl = document.getElementById("best");
+    const startBtn = document.getElementById("startBtn");
+
+    let player, blocks, score, running, gameOver;
+    let left = false, right = false;
+    let lastTime = 0, spawnTimer = 0;
+    let best = 0;
+
+    try {
+      best = Number(localStorage.getItem("dodgeBest")) || 0;
+    } catch (e) {}
+
+    bestEl.textContent = best;
+
+    function resetGame() {
+      player = { x: 180, y: 490, w: 40, h: 40, speed: 300 };
+      blocks = [];
+      score = 0;
+      spawnTimer = 0;
+      lastTime = 0;
+      running = true;
+      gameOver = false;
+      scoreEl.textContent = "0";
+      startBtn.textContent = "Restart Game";
+      requestAnimationFrame(loop);
+    }
+
+    function endGame() {
+      running = false;
+      gameOver = true;
+      startBtn.textContent = "Play Again";
+
+      if (score > best) {
+        best = score;
+        bestEl.textContent = best;
+        try {
+          localStorage.setItem("dodgeBest", best);
+        } catch (e) {}
+      }
+
+      draw();
+      ctx.fillStyle = "#000000bb";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fb7185";
+      ctx.font = "bold 36px Arial";
+      ctx.fillText("GAME OVER", 200, 245);
+
+      ctx.fillStyle = "white";
+      ctx.font = "20px Arial";
+      ctx.fillText("Score: " + score, 200, 285);
+
+      ctx.font = "15px Arial";
+      ctx.fillStyle = "#cbd5e1";
+      ctx.fillText("Press Play Again to retry", 200, 325);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, 400, 550);
+
+      // Background grid
+      ctx.strokeStyle = "#172640";
+      ctx.lineWidth = 1;
+      for (let x = 0; x < 400; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, 550);
+        ctx.stroke();
+      }
+      for (let y = 0; y < 550; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(400, y);
+        ctx.stroke();
+      }
+
+      // Player
+      ctx.shadowColor = "#22d3ee";
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = "#22d3ee";
+      ctx.beginPath();
+      ctx.roundRect(player.x, player.y, player.w, player.h, 9);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Player highlight
+      ctx.fillStyle = "#e0faff";
+      ctx.fillRect(player.x + 10, player.y + 8, 20, 5);
+
+      // Falling obstacles
+      for (const b of blocks) {
+        ctx.shadowColor = "#fb365d";
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = "#f43f5e";
+        ctx.beginPath();
+        ctx.roundRect(b.x, b.y, b.w, b.h, 5);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    function loop(time) {
+      if (!running) return;
+
+      const dt = lastTime ? Math.min((time - lastTime) / 1000, 0.04) : 0;
+      lastTime = time;
+
+      if (left) player.x -= player.speed * dt;
+      if (right) player.x += player.speed * dt;
+
+      player.x = Math.max(0, Math.min(400 - player.w, player.x));
+
+      spawnTimer += dt;
+      const spawnDelay = Math.max(0.22, 0.75 - score * 0.006);
+
+      if (spawnTimer >= spawnDelay) {
+        spawnTimer = 0;
+        const size = 22 + Math.random() * 22;
+        blocks.push({
+          x: Math.random() * (400 - size),
+          y: -size,
+          w: size,
+          h: size,
+          speed: 170 + Math.min(score * 3, 280) + Math.random() * 70
+        });
+      }
+
+      for (const b of blocks) {
+        b.y += b.speed * dt;
+
+        if (
+          player.x < b.x + b.w &&
+          player.x + player.w > b.x &&
+          player.y < b.y + b.h &&
+          player.y + player.h > b.y
+        ) {
+          endGame();
+          return;
+        }
+      }
+
+      const oldLength = blocks.length;
+      blocks = blocks.filter(b => b.y < 560);
+      score += oldLength - blocks.length;
+      scoreEl.textContent = score;
+
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    function setKey(key, value) {
+      if (["ArrowLeft", "a", "A"].includes(key)) left = value;
+      if (["ArrowRight", "d", "D"].includes(key)) right = value;
+    }
+
+    document.addEventListener("keydown", e => {
+      if (["ArrowLeft", "ArrowRight", " "].includes(e.key)) {
+        e.preventDefault();
+      }
+      setKey(e.key, true);
+      if (e.key === " " && !running) resetGame();
+    });
+
+    document.addEventListener("keyup", e => setKey(e.key, false));
+    window.addEventListener("blur", () => {
+      left = false;
+      right = false;
+    });
+
+    function holdButton(id, direction) {
+      const btn = document.getElementById(id);
+
+      btn.addEventListener("pointerdown", e => {
+        e.preventDefault();
+        if (direction === "left") left = true;
+        else right = true;
+        btn.setPointerCapture(e.pointerId);
+      });
+
+      const release = () => {
+        if (direction === "left") left = false;
+        else right = false;
+      };
+
+      btn.addEventListener("pointerup", release);
+      btn.addEventListener("pointercancel", release);
+      btn.addEventListener("lostpointercapture", release);
+    }
+
+    holdButton("leftBtn", "left");
+    holdButton("rightBtn", "right");
+
+    // Touch anywhere on the game screen to steer.
+    canvas.addEventListener("pointerdown", e => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width * 400;
+      left = x < 200;
+      right = x >= 200;
+    });
+
+    canvas.addEventListener("pointermove", e => {
+      if (e.buttons || e.pointerType === "touch") {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / rect.width * 400;
+        left = x < 200;
+        right = x >= 200;
+      }
+    });
+
+    canvas.addEventListener("pointerup", () => {
+      left = false;
+      right = false;
+    });
+
+    canvas.addEventListener("pointercancel", () => {
+      left = false;
+      right = false;
+    });
+
+    startBtn.addEventListener("click", resetGame);
+
+    // Initial title screen
+    player = { x: 180, y: 490, w: 40, h: 40, speed: 300 };
+    blocks = [];
+    score = 0;
+    running = false;
+    gameOver = false;
+    draw();
+
+    ctx.fillStyle = "#67e8f9";
+    ctx.textAlign = "center";
+    ctx.font = "bold 29px Arial";
+    ctx.fillText("READY?", 200, 245);
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "16px Arial";
+    ctx.fillText("Dodge every falling block!", 200, 280);
+  </script>
+</body>
+</html>
